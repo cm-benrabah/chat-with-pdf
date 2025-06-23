@@ -8,87 +8,68 @@ from langchain_community.chat_models import ChatOllama
 from langchain.chains.question_answering import load_qa_chain
 from sentence_transformers import SentenceTransformer
 
-# ========== Load or Download Embedding Model ==========
+# ——— Embedding model loader ———
 def get_embedding_model(path="./models/all-MiniLM-L6-v2"):
     if not os.path.exists(path):
         st.info("🔽 Downloading embedding model...")
         model = SentenceTransformer("all-MiniLM-L6-v2")
         model.save(path)
-    else:
-        print("✅ Using cached model from:", path)
     return HuggingFaceEmbeddings(model_name=path)
 
 @st.cache_resource
 def load_embedding_model():
     return get_embedding_model()
 
-# ========== Load and Split PDF ==========
+# ——— PDF loader & splitter ———
 def load_pdf(file):
     pdf = PdfReader(file)
-    text = ""
-    for page in pdf.pages:
-        text += page.extract_text() or ""
+    text = "".join(page.extract_text() or "" for page in pdf.pages)
     return text
 
 def split_text_into_chunks(text):
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
-        length_function=len
-    )
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     return splitter.split_text(text)
 
-# ========== Streamlit UI ==========
+# ——— Initialize app ———
 st.set_page_config(page_title="Chat with PDF", layout="wide")
 st.title("📄 Chat with your PDF")
 
-uploaded_file = st.file_uploader("Upload a PDF file", type="pdf")
+# Upload
+uploaded = st.file_uploader("Upload a PDF", type="pdf")
+if uploaded:
+    if "vectorstore" not in st.session_state:
+        text = load_pdf(uploaded)
+        st.success("PDF loaded.")
+        chunks = split_text_into_chunks(text)
+        st.info(f"{len(chunks)} chunks created.")
+        emb = load_embedding_model()
+        st.session_state.vectorstore = FAISS.from_texts(chunks, emb)
+        st.session_state.chat_history = []
+        st.session_state.query = ""  # holds current input
 
-# Session state for chat history
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+    # show history
+    for idx, entry in enumerate(st.session_state.chat_history, 1):
+        st.markdown(f"**Q{idx}:** {entry['question']}")
+        st.markdown(f"**A{idx}:** {entry['answer']}")
 
-if uploaded_file:
-    raw_text = load_pdf(uploaded_file)
-    st.success("✅ PDF loaded successfully.")
+    # callback when hitting Enter
+    def process_query():
+        q = st.session_state.query.strip()
+        if not q:
+            return
+        # show inline spinner
+        placeholder = st.empty()
+        placeholder.info("🤖 Thinking...")
+        docs = st.session_state.vectorstore.as_retriever().get_relevant_documents(q)
+        llm = ChatOllama(model="deepseek-r1:8b")
+        qa = load_qa_chain(llm, chain_type="stuff")
+        ans = qa.run(input_documents=docs, question=q)
+        st.session_state.chat_history.append({"question": q, "answer": ans})
+        st.session_state.query = ""         # clear input
+        placeholder.empty()                # remove spinner
 
-    chunks = split_text_into_chunks(raw_text)
-    st.info(f"🔹 Document split into {len(chunks)} chunks.")
-
-    embedding = load_embedding_model()
-
-    # Generate embeddings and store in FAISS
-    with st.spinner("🔍 Generating vector store..."):
-        vectorstore = FAISS.from_texts(chunks, embedding)
-    st.success("✅ Embeddings stored in vector DB (FAISS).")
-
-    # Display sample chunks
-    st.write("### Sample Chunks")
-    for i, chunk in enumerate(chunks[:3]):
-        st.text(f"Chunk {i+1}: {chunk[:300]}...")
-
-    # Prompt input (multi-prompt supported)
-    query = st.text_input("💬 Ask a question about the PDF")
-
-    if query:
-        with st.spinner("🤖 Generating answer from Deepseek..."):
-            retriever = vectorstore.as_retriever()
-            docs = retriever.get_relevant_documents(query)
-
-            llm = ChatOllama(model="deepseek-r1:8b")  # or deepseek-r1:8b if you prefer
-            qa_chain = load_qa_chain(llm, chain_type="stuff")
-
-            answer = qa_chain.run(input_documents=docs, question=query)
-
-            # Store in history
-            st.session_state.chat_history.append({"question": query, "answer": answer})
-
-    # Display chat history
-    if st.session_state.chat_history:
-        st.write("### 🧠 Conversation History")
-        for i, entry in enumerate(reversed(st.session_state.chat_history), 1):
-            st.markdown(f"**Q{i}:** {entry['question']}")
-            st.markdown(f"**A{i}:** {entry['answer']}")
+    # text_input with on_change; submit with Enter
+    st.text_input("💬 Ask a question", key="query", on_change=process_query)
 
 else:
-    st.warning("⬆️ Please upload a PDF to get started.")
+    st.warning("Please upload a PDF to begin.")
