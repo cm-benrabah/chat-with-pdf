@@ -30,46 +30,66 @@ def split_text_into_chunks(text):
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     return splitter.split_text(text)
 
-# ——— Initialize app ———
+# ——— Initialize Streamlit App ———
 st.set_page_config(page_title="Chat with PDF", layout="wide")
 st.title("📄 Chat with your PDF")
 
-# Upload
 uploaded = st.file_uploader("Upload a PDF", type="pdf")
+
 if uploaded:
     if "vectorstore" not in st.session_state:
         text = load_pdf(uploaded)
-        st.success("PDF loaded.")
+        st.success("✅ PDF loaded.")
         chunks = split_text_into_chunks(text)
-        st.info(f"{len(chunks)} chunks created.")
+        st.info(f"🔹 {len(chunks)} chunks created.")
         emb = load_embedding_model()
         st.session_state.vectorstore = FAISS.from_texts(chunks, emb)
         st.session_state.chat_history = []
-        st.session_state.query = ""  # holds current input
+        st.session_state.query = ""
 
-    # show history
-    for idx, entry in enumerate(st.session_state.chat_history, 1):
-        st.markdown(f"**Q{idx}:** {entry['question']}")
-        st.markdown(f"**A{idx}:** {entry['answer']}")
+    for i, chat in enumerate(st.session_state.chat_history, 1):
+        st.markdown(f"**Q{i}:** {chat['question']}")
+        st.markdown(f"**A{i}:** {chat['answer']}")
 
-    # callback when hitting Enter
     def process_query():
-        q = st.session_state.query.strip()
-        if not q:
+        query = st.session_state.query.strip()
+        if not query:
             return
-        # show inline spinner
-        placeholder = st.empty()
-        placeholder.info("🤖 Thinking...")
-        docs = st.session_state.vectorstore.as_retriever().get_relevant_documents(q)
-        llm = ChatOllama(model="deepseek-r1:8b")
-        qa = load_qa_chain(llm, chain_type="stuff")
-        ans = qa.run(input_documents=docs, question=q)
-        st.session_state.chat_history.append({"question": q, "answer": ans})
-        st.session_state.query = ""         # clear input
-        placeholder.empty()                # remove spinner
 
-    # text_input with on_change; submit with Enter
+        placeholder = st.empty()
+        placeholder.info("🤖 Generating answer...")
+
+        retriever = st.session_state.vectorstore.as_retriever()
+        results = st.session_state.vectorstore.similarity_search_with_score(query, k=3)
+
+        # Show scores for transparency
+        threshold = 1
+        relevant_docs = []
+        for doc, score in results:
+            st.markdown(f"🔎 Score: `{score:.3f}` → {'✅ Relevant' if score < threshold else '❌ Irrelevant'}")
+            if score < threshold:
+                relevant_docs.append(doc)
+
+        llm = ChatOllama(model="mistral")  # Replace with your Ollama model if needed
+
+        if relevant_docs:
+            qa = load_qa_chain(llm, chain_type="stuff")
+            answer = qa.run(input_documents=relevant_docs, question=query)
+            tag = "_🔍 Answered using RAG (relevant documents)_"
+        else:
+            answer = llm.invoke(query).content
+            tag = "_💬 Answered using LLM only (no relevant content found)_"
+
+        #answer = "empty answer"
+        st.session_state.chat_history.append({
+            "question": query,
+            "answer": f"{answer}\n\n{tag}"
+        })
+
+        st.session_state.query = ""
+        placeholder.empty()
+
     st.text_input("💬 Ask a question", key="query", on_change=process_query)
 
 else:
-    st.warning("Please upload a PDF to begin.")
+    st.warning("⬆️ Please upload a PDF to get started.")
