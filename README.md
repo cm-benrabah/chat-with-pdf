@@ -78,7 +78,7 @@ chat-with-pdf/
 ## 📝 Customization & Notes
 
 - The similarity threshold can be tuned:
-
+---
 ```python
 threshold = 1  # Lower value = more strict match
 ## 📝 Notes
