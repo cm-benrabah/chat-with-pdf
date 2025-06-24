@@ -73,14 +73,15 @@ chat-with-pdf/
    - If a relevant match is found, answer is generated via **RAG (Retrieve-then-Generate)**.
    - If no match is strong enough (above threshold), the LLM answers the prompt without retrieval.
 
----
 
 ## 📝 Customization & Notes
 
 - The similarity threshold can be tuned:
----
+
 ```python
 threshold = 1  # Lower value = more strict match
+```
+
 ## 📝 Notes
 
 - The `models/` folder is excluded from Git to avoid pushing large files. A `.gitkeep` or `.empty` file is used to keep it in the repo structure.
