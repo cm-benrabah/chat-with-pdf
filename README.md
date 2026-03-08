@@ -25,7 +25,7 @@ This Streamlit mini-project allows you to upload a PDF document and ask question
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/your-username/chat-with-pdf.git
+git clone https://github.com/cm_benrabah/chat-with-pdf.git
 cd chat-with-pdf
 ```
 
